@@ -498,6 +498,11 @@
             // STATE BARU: Untuk notifikasi UI menggantikan alert/confirm bawaan browser
             const [adminMessage, setAdminMessage] = useState('');
             const [showConfirmClean, setShowConfirmClean] = useState(false);
+            
+            // STATE BARU: Untuk edit password dan delete user inline
+            const [editPasswordUser, setEditPasswordUser] = useState(null);
+            const [newPasswordInput, setNewPasswordInput] = useState('');
+            const [deleteUserConfirm, setDeleteUserConfirm] = useState(null);
 
             const pendingSubs = submissions.filter(s => s.status === 'pending');
             const historySubs = submissions.filter(s => s.status !== 'pending');
@@ -615,6 +620,44 @@
                     setAdminMessage("⚠️ Browser memblokir unduhan. Silakan klik kanan pada foto dan pilih 'Save image as...'");
                     setTimeout(() => setAdminMessage(''), 5000);
                 }
+            };
+
+            // FITUR BARU: Ganti Password & Hapus User (Diperbaiki tanpa window.prompt / window.confirm)
+            const initiateEditPassword = (user) => {
+                setEditPasswordUser(user);
+                setNewPasswordInput('');
+                setDeleteUserConfirm(null); // Tutup prompt lain jika ada
+            };
+
+            const confirmEditPassword = async () => {
+                if (newPasswordInput && newPasswordInput.trim() !== '') {
+                    try {
+                        await db.ref('data/profiles/' + editPasswordUser.id).update({ password: newPasswordInput.trim() });
+                        setAdminMessage(`✅ Password untuk @${editPasswordUser.username} berhasil diubah!`);
+                        setTimeout(() => setAdminMessage(''), 4000);
+                    } catch (err) {
+                        setAdminMessage("⚠️ Gagal mengubah password.");
+                        setTimeout(() => setAdminMessage(''), 4000);
+                    }
+                }
+                setEditPasswordUser(null);
+            };
+
+            const initiateDeleteUser = (user) => {
+                setDeleteUserConfirm(user);
+                setEditPasswordUser(null); // Tutup prompt lain jika ada
+            };
+
+            const confirmDeleteUser = async () => {
+                try {
+                    await db.ref('data/profiles/' + deleteUserConfirm.id).remove();
+                    setAdminMessage(`✅ Akun @${deleteUserConfirm.username} berhasil dihapus permanen.`);
+                    setTimeout(() => setAdminMessage(''), 4000);
+                } catch (err) {
+                    setAdminMessage("⚠️ Gagal menghapus akun.");
+                    setTimeout(() => setAdminMessage(''), 4000);
+                }
+                setDeleteUserConfirm(null);
             };
 
             return (
@@ -884,16 +927,54 @@
 
                         {/* MANAJEMEN AKUN */}
                         {activeTab === 'users' && (
-                            <div className="max-w-2xl mx-auto overflow-x-auto border border-slate-200 rounded-xl bg-white">
+                            <div className="max-w-4xl mx-auto overflow-x-auto border border-slate-200 rounded-xl bg-white">
                                 <table className="w-full text-left border-collapse">
-                                    <thead><tr className="bg-slate-50 border-b border-slate-200"><th className="p-4 font-bold text-slate-600">Username</th><th className="p-4 font-bold text-slate-600">Password</th><th className="p-4 text-right font-bold text-slate-600">Total Poin</th></tr></thead>
+                                    <thead>
+                                        <tr className="bg-slate-50 border-b border-slate-200">
+                                            <th className="p-4 font-bold text-slate-600">Username</th>
+                                            <th className="p-4 font-bold text-slate-600">Password</th>
+                                            <th className="p-4 text-center font-bold text-slate-600">Total Poin</th>
+                                            <th className="p-4 text-right font-bold text-slate-600">Aksi</th>
+                                        </tr>
+                                    </thead>
                                     <tbody>
-                                        {userProfiles.length === 0 ? <tr><td colSpan="3" className="text-center p-8 text-slate-400">Kosong</td></tr> : userProfiles.map(user => (
+                                        {userProfiles.length === 0 ? <tr><td colSpan="4" className="text-center p-8 text-slate-400">Kosong</td></tr> : userProfiles.map(user => (
                                             <tr key={user.id} className="border-b border-slate-100 hover:bg-slate-50">
                                                 <td className="p-4 font-bold text-slate-700">@{user.username}</td>
                                                 <td className="p-4 font-mono text-slate-500 bg-slate-50/50">{user.password}</td>
-                                                <td className="p-4 text-right">
+                                                <td className="p-4 text-center">
                                                     <span className="text-emerald-600 font-bold text-lg">{user.totalPoints} Pts</span>
+                                                </td>
+                                                <td className="p-4 flex justify-end gap-2">
+                                                    {editPasswordUser?.id === user.id ? (
+                                                        <div className="flex items-center gap-1 bg-blue-50 p-1 rounded border border-blue-100">
+                                                            <input 
+                                                                type="text" 
+                                                                value={newPasswordInput} 
+                                                                onChange={e => setNewPasswordInput(e.target.value)} 
+                                                                placeholder="Ketik password baru..." 
+                                                                className="border border-slate-300 rounded px-2 py-1 text-xs outline-none w-32"
+                                                                autoFocus
+                                                            />
+                                                            <button onClick={confirmEditPassword} className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1 rounded text-xs font-bold transition">Simpan</button>
+                                                            <button onClick={() => setEditPasswordUser(null)} className="bg-slate-300 hover:bg-slate-400 text-slate-700 px-2 py-1 rounded text-xs font-bold transition">Batal</button>
+                                                        </div>
+                                                    ) : deleteUserConfirm?.id === user.id ? (
+                                                        <div className="flex items-center gap-2 bg-red-50 p-1.5 rounded border border-red-100">
+                                                            <span className="text-xs text-red-600 font-bold">Yakin Hapus Permanen?</span>
+                                                            <button onClick={confirmDeleteUser} className="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded text-xs font-bold transition">Ya</button>
+                                                            <button onClick={() => setDeleteUserConfirm(null)} className="bg-slate-300 hover:bg-slate-400 text-slate-700 px-2 py-1 rounded text-xs font-bold transition">Batal</button>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <button onClick={() => initiateEditPassword(user)} className="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 py-2 rounded-lg text-xs font-bold transition shadow-sm border border-blue-200" title="Ganti Password">
+                                                                <i className="fas fa-key mr-1"></i> Edit
+                                                            </button>
+                                                            <button onClick={() => initiateDeleteUser(user)} className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-xs font-bold transition shadow-sm border border-red-200" title="Hapus Akun Karyawan">
+                                                                <i className="fas fa-trash-alt mr-1"></i> Hapus
+                                                            </button>
+                                                        </>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ))}
