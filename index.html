@@ -65,7 +65,7 @@
                 const fallbackTimer = setTimeout(() => {
                     isTimeout = true;
                     setIsLoading(false);
-                    setErrorMsg("Koneksi Database lambat. Pastikan Rules Firebase Anda sudah diset ke true.");
+                    setErrorMsg("Koneksi Database lambat. Pastikan koneksi internet Anda stabil.");
                 }, 10000);
 
                 const onProfilesChange = snapshot => {
@@ -86,12 +86,7 @@
                 profilesRef.on('value', onProfilesChange, (error) => {
                     if (isTimeout) return;
                     clearTimeout(fallbackTimer);
-                    
-                    if (error.message && error.message.includes("permission_denied")) {
-                        setErrorMsg("Akses Database Ditolak! Izin Rules Firebase belum dibuka.");
-                    } else {
-                        setErrorMsg("Gagal terhubung ke database.");
-                    }
+                    setErrorMsg("Gagal terhubung ke database.");
                     setIsLoading(false);
                 });
 
@@ -114,6 +109,8 @@
                 if (currentUser) {
                     const updatedProfile = profiles.find(p => p.id === currentUser.id);
                     if (updatedProfile) setCurrentUser(updatedProfile);
+                    // Logout otomatis jika user dihapus oleh admin
+                    else handleLogout();
                 }
             }, [profiles]);
 
@@ -146,7 +143,7 @@
                     setUsername('');
                     setPassword('');
                 } catch (err) {
-                    setErrorMsg('Gagal mendaftar. Pastikan Rules Firebase true.');
+                    setErrorMsg('Gagal mendaftar. Pastikan koneksi internet stabil.');
                 }
             };
 
@@ -187,7 +184,7 @@
                     </header>
 
                     <main className="max-w-5xl mx-auto px-4 py-8">
-                        {errorMsg && view === 'login' && <div className="max-w-md mx-auto bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-200 mb-4 text-center">{errorMsg}</div>}
+                        {errorMsg && view === 'login' && <div className="max-w-md mx-auto bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-200 mb-4 text-center font-bold">{errorMsg}</div>}
                         {view === 'login' && <AuthForm type="login" username={username} setUsername={setUsername} password={password} setPassword={setPassword} onSubmit={handleLogin} switchView={() => { setView('register'); setErrorMsg(''); }} />}
                         {view === 'register' && <AuthForm type="register" username={username} setUsername={setUsername} password={password} setPassword={setPassword} onSubmit={handleRegister} switchView={() => { setView('login'); setErrorMsg(''); }} />}
                         {view === 'dashboard' && currentUser?.role === 'user' && <UserDashboard currentUser={currentUser} submissions={submissions.filter(s => s.userId === currentUser.id)} profiles={profiles} db={db} />}
@@ -229,12 +226,11 @@
         // --- KOMPONEN USER ---
         function UserDashboard({ currentUser, submissions, profiles, db }) {
             const [activityType, setActivityType] = useState('Aktivitas Fisik');
-            const [imageFile, setImageFile] = useState(null);
             const [imageBase64, setImageBase64] = useState('');
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [selectedImage, setSelectedImage] = useState(null);
             
-            // STATE BARU: Untuk menggantikan fitur alert/confirm yang diblokir sistem
+            // State Notifikasi & Hapus Inline
             const [localMessage, setLocalMessage] = useState('');
             const [deleteConfirmId, setDeleteConfirmId] = useState(null);
             
@@ -279,7 +275,6 @@
                 if (!imageBase64) return;
                 setIsSubmitting(true);
 
-                // Rekomendasi Poin Dasar
                 let recommendedPts = 0;
                 if (activityType === 'Aktivitas Fisik') recommendedPts = 40;
                 else if (activityType === 'Pola Makan Sehat') recommendedPts = 20;
@@ -306,7 +301,6 @@
 
                     setImageBase64(''); 
                     if (fileInputRef.current) fileInputRef.current.value = '';
-                    
                     setLocalMessage("✅ Berhasil! Bukti telah terkirim ke antrean Admin.");
                     setTimeout(() => setLocalMessage(''), 5000);
                 } catch (err) { 
@@ -317,11 +311,10 @@
                 }
             };
 
-            // FUNGSI HAPUS (DELETE) YANG SUDAH DIPERBAIKI TOTAL (Tanpa window.confirm)
-            const handleDelete = async (subId, e) => {
+            const handleDelete = (subId, e) => {
                 e.preventDefault();
                 e.stopPropagation(); 
-                setDeleteConfirmId(subId); // Munculkan tombol konfirmasi inline
+                setDeleteConfirmId(subId); 
             };
 
             const confirmDelete = async (e) => {
@@ -333,7 +326,6 @@
                     setLocalMessage("✅ Foto bukti berhasil dihapus/dibatalkan.");
                     setTimeout(() => setLocalMessage(''), 5000);
                 } catch (err) {
-                    console.error("Delete error: ", err);
                     setLocalMessage("⚠️ Gagal menghapus data. Pastikan internet stabil.");
                     setTimeout(() => setLocalMessage(''), 5000);
                 } finally {
@@ -402,18 +394,15 @@
                                     {isSubmitting ? <><i className="fas fa-spinner fa-spin mr-2"></i> Mengirim...</> : <><i className="fas fa-paper-plane mr-2"></i> Kirim Bukti</>}
                                 </button>
                                 
-                                {/* PESAN NOTIFIKASI BERHASIL / GAGAL */}
                                 {localMessage && (
                                     <div className={`text-sm text-center mt-3 font-bold py-2 px-3 rounded-lg ${localMessage.includes('⚠️') ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
                                         {localMessage}
                                     </div>
                                 )}
 
-                                {/* PERUBAHAN: Teks Notifikasi Permanen di Bawah Tombol */}
                                 <p className="text-xs text-amber-600 text-center mt-2 font-medium bg-amber-50 py-2 px-2 rounded-lg border border-amber-200">
                                     <i className="fas fa-info-circle mr-1"></i> Anda sudah yakin? Periksa kembali, bukti yang dikirimkan harus sesuai dengan kategorinya.
                                 </p>
-
                             </form>
                         </div>
                     </div>
@@ -424,7 +413,6 @@
                             <div className="space-y-4">
                                 {submissions.map(sub => (
                                     <div key={sub.id} className="flex gap-4 p-4 border rounded-xl bg-slate-50 group hover:shadow-sm transition">
-                                        {/* PERUBAHAN TAMPILAN GAMBAR DIHAPUS */}
                                         {sub.evidenceBase64 && sub.evidenceBase64 !== "" ? (
                                             <img src={sub.evidenceBase64} onClick={() => setSelectedImage(sub.evidenceBase64)} className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-80 transition shadow-sm" title="Klik untuk memperbesar foto" />
                                         ) : (
@@ -446,7 +434,6 @@
                                                     </span>
                                                 </div>
                                                 
-                                                {/* PERMINTAAN 2: TOMBOL DELETE (Dengan Konfirmasi Inline) */}
                                                 {sub.status === 'pending' && (
                                                     deleteConfirmId === sub.id ? (
                                                         <div className="flex flex-col gap-1 items-end z-10 relative">
@@ -495,14 +482,13 @@
             const [manualPoints, setManualPoints] = useState('40');
             const [isManualSubmitting, setIsManualSubmitting] = useState(false);
 
-            // STATE BARU: Untuk notifikasi UI menggantikan alert/confirm bawaan browser
             const [adminMessage, setAdminMessage] = useState('');
             const [showConfirmClean, setShowConfirmClean] = useState(false);
             
-            // STATE BARU: Untuk edit password dan delete user inline
             const [editPasswordUser, setEditPasswordUser] = useState(null);
             const [newPasswordInput, setNewPasswordInput] = useState('');
             const [deleteUserConfirm, setDeleteUserConfirm] = useState(null);
+            const [deleteHistoryConfirmId, setDeleteHistoryConfirmId] = useState(null);
 
             const pendingSubs = submissions.filter(s => s.status === 'pending');
             const historySubs = submissions.filter(s => s.status !== 'pending');
@@ -516,10 +502,7 @@
                 else if (manualActivity === 'Tidur & Pemulihan') pts = 10;
                 else if (manualActivity === 'Partisipasi Program') pts = 40;
                 else if (manualActivity === 'Bonus Ajak Keluarga') pts = 20; 
-                else if (manualActivity === 'Challenge: Mudah') pts = 50;
-                else if (manualActivity === 'Challenge: Sedang') pts = 100;
-                else if (manualActivity === 'Challenge: Sulit') pts = 150;
-                else if (manualActivity === 'Challenge: Sangat Sulit') pts = 200;
+                else if (manualActivity.includes('Challenge')) pts = 0; 
                 setManualPoints(pts.toString());
             }, [manualActivity]);
 
@@ -590,10 +573,7 @@
                 }
             };
 
-            // PERBAIKAN: Mengganti confirm() bawaan dengan state popup agar tidak diblokir browser
-            const handleCleanup = async () => {
-                setShowConfirmClean(true);
-            };
+            const handleCleanup = () => setShowConfirmClean(true);
 
             const executeCleanup = async () => {
                 setShowConfirmClean(false);
@@ -604,7 +584,7 @@
                         cleanedCount++;
                     }
                 }
-                setAdminMessage(`🧹 Pembersihan Selesai! ${cleanedCount} gambar foto telah berhasil dihapus dari database.`);
+                setAdminMessage(`🧹 Pembersihan Selesai! ${cleanedCount} gambar foto telah dihapus dari database.`);
                 setTimeout(() => setAdminMessage(''), 6000);
             };
 
@@ -617,16 +597,15 @@
                     a.click();
                     document.body.removeChild(a);
                 } catch (error) {
-                    setAdminMessage("⚠️ Browser memblokir unduhan. Silakan klik kanan pada foto dan pilih 'Save image as...'");
+                    setAdminMessage("⚠️ Browser memblokir unduhan. Silakan klik kanan dan 'Save image as...'");
                     setTimeout(() => setAdminMessage(''), 5000);
                 }
             };
 
-            // FITUR BARU: Ganti Password & Hapus User (Diperbaiki tanpa window.prompt / window.confirm)
             const initiateEditPassword = (user) => {
                 setEditPasswordUser(user);
                 setNewPasswordInput('');
-                setDeleteUserConfirm(null); // Tutup prompt lain jika ada
+                setDeleteUserConfirm(null);
             };
 
             const confirmEditPassword = async () => {
@@ -645,19 +624,44 @@
 
             const initiateDeleteUser = (user) => {
                 setDeleteUserConfirm(user);
-                setEditPasswordUser(null); // Tutup prompt lain jika ada
+                setEditPasswordUser(null); 
             };
 
             const confirmDeleteUser = async () => {
                 try {
                     await db.ref('data/profiles/' + deleteUserConfirm.id).remove();
-                    setAdminMessage(`✅ Akun @${deleteUserConfirm.username} berhasil dihapus permanen.`);
+                    const userSubs = submissions.filter(s => s.userId === deleteUserConfirm.id);
+                    for (const sub of userSubs) {
+                        await db.ref('data/submissions/' + sub.id).remove();
+                    }
+                    setAdminMessage(`✅ Akun @${deleteUserConfirm.username} dan seluruh riwayatnya terhapus permanen.`);
                     setTimeout(() => setAdminMessage(''), 4000);
                 } catch (err) {
                     setAdminMessage("⚠️ Gagal menghapus akun.");
                     setTimeout(() => setAdminMessage(''), 4000);
                 }
                 setDeleteUserConfirm(null);
+            };
+
+            const confirmDeleteHistory = async (subId) => {
+                try {
+                    const sub = submissions.find(s => s.id === subId);
+                    if (sub && sub.status === 'approved' && sub.pointsAwarded > 0) {
+                        const userProf = profiles.find(p => p.id === sub.userId);
+                        if (userProf) {
+                            await db.ref('data/profiles/' + userProf.id).update({
+                                totalPoints: Math.max(0, (userProf.totalPoints || 0) - sub.pointsAwarded)
+                            });
+                        }
+                    }
+                    await db.ref('data/submissions/' + subId).remove();
+                    setAdminMessage(`✅ Riwayat aktivitas berhasil dihapus.`);
+                    setTimeout(() => setAdminMessage(''), 4000);
+                } catch(err) {
+                    setAdminMessage("⚠️ Gagal menghapus riwayat.");
+                    setTimeout(() => setAdminMessage(''), 4000);
+                }
+                setDeleteHistoryConfirmId(null);
             };
 
             return (
@@ -689,14 +693,12 @@
                         </div>
                     </div>
                     
-                    {/* NOTIFIKASI ADMIN */}
                     {adminMessage && (
                         <div className={`mx-6 mt-6 p-4 rounded-xl font-bold text-center border shadow-sm ${adminMessage.includes('⚠️') ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
                             {adminMessage}
                         </div>
                     )}
 
-                    {/* KONFIRMASI PEMBERSIHAN MEMORI */}
                     {showConfirmClean && (
                         <div className="mx-6 mt-6 p-6 bg-amber-50 border-2 border-amber-200 rounded-xl text-center shadow-md animate-pulse">
                             <i className="fas fa-exclamation-triangle text-4xl text-amber-500 mb-3"></i>
@@ -710,13 +712,11 @@
                     )}
 
                     <div className="p-6 bg-slate-50 min-h-[500px]">
-                        
                         {/* TAB MENUNGGU VALIDASI (PENDING) */}
                         {activeTab === 'pending' && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                 {pendingSubs.length === 0 ? <div className="col-span-2 text-center py-12"><i className="fas fa-clipboard-check text-5xl text-emerald-200 mb-4"></i><p className="text-slate-500 font-medium">Semua submission sudah divalidasi!</p></div> : pendingSubs.map(sub => (
                                     <div key={sub.id} className="border border-slate-200 rounded-xl flex flex-col relative overflow-hidden bg-white shadow-sm hover:shadow-md transition">
-                                        
                                         <div className="relative">
                                             {sub.evidenceBase64 && sub.evidenceBase64 !== "" ? (
                                                 <img src={sub.evidenceBase64} className="w-full h-56 object-cover bg-slate-100 border-b border-slate-200" />
@@ -725,7 +725,6 @@
                                                     <i className="fas fa-image-slash text-3xl mb-2"></i><span>Foto Dihapus</span>
                                                 </div>
                                             )}
-
                                             {sub.evidenceBase64 && sub.evidenceBase64 !== "" && (
                                                 <button onClick={() => handleDownload(sub.evidenceBase64, sub.username, sub.timestamp)} 
                                                     className="absolute bottom-3 right-3 bg-slate-900/90 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg transition flex items-center gap-2 text-sm font-bold backdrop-blur-sm border border-slate-600">
@@ -733,15 +732,12 @@
                                                 </button>
                                             )}
                                         </div>
-
                                         <div className="p-5 flex-1 flex flex-col">
                                             <div className="flex justify-between items-center mb-2">
                                                 <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100">@{sub.username}</span>
                                                 <span className="text-xs text-slate-400 font-medium">{new Date(sub.timestamp).toLocaleString('id-ID')}</span>
                                             </div>
-                                            
                                             <h4 className="font-bold text-lg text-slate-800">{sub.activity}</h4>
-                                            
                                             <div className="mt-4 pt-4 border-t border-slate-100 flex gap-3 items-center">
                                                 <div className="flex flex-col w-24">
                                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Isi Poin</label>
@@ -773,7 +769,6 @@
                                         className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm"
                                     />
                                 </div>
-                                
                                 {sortedHistoryUsers.length === 0 ? (
                                     <div className="text-center py-10 text-slate-500">
                                         <i className="fas fa-folder-open text-4xl mb-3 text-slate-300"></i>
@@ -790,7 +785,6 @@
                                                 <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
                                                     {groupedHistory[user].map(sub => (
                                                         <div key={sub.id} className="p-4 flex gap-4 hover:bg-slate-50 transition">
-                                                            {/* PERUBAHAN TAMPILAN GAMBAR DIHAPUS */}
                                                             {sub.evidenceBase64 && sub.evidenceBase64 !== "" ? (
                                                                 <img src={sub.evidenceBase64} className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm flex-shrink-0" />
                                                             ) : (
@@ -805,9 +799,22 @@
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex justify-between items-start mb-1 gap-2">
                                                                     <h4 className="font-bold text-slate-800 leading-tight truncate">{sub.activity}</h4>
-                                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex-shrink-0 ${sub.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                                                                        {sub.status === 'approved' ? `+${sub.pointsAwarded} Pts` : 'Ditolak'}
-                                                                    </span>
+                                                                    
+                                                                    <div className="flex gap-2 items-center flex-shrink-0">
+                                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex-shrink-0 ${sub.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                                                            {sub.status === 'approved' ? `+${sub.pointsAwarded} Pts` : 'Ditolak'}
+                                                                        </span>
+                                                                        {deleteHistoryConfirmId === sub.id ? (
+                                                                            <div className="flex gap-1 items-center">
+                                                                                <button onClick={() => confirmDeleteHistory(sub.id)} className="bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded transition">Yakin?</button>
+                                                                                <button onClick={() => setDeleteHistoryConfirmId(null)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold px-2 py-1 rounded transition">Batal</button>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <button onClick={() => setDeleteHistoryConfirmId(sub.id)} className="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 p-1.5 rounded transition" title="Hapus Riwayat ini">
+                                                                                <i className="fas fa-trash-alt text-[10px]"></i>
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
                                                                 <p className="text-xs text-slate-400 mt-1">{new Date(sub.timestamp).toLocaleString('id-ID')}</p>
                                                             </div>
@@ -832,7 +839,6 @@
                                             if (idx === 0) rankIcon = <i className="fas fa-medal text-yellow-500 text-2xl drop-shadow-sm"></i>;
                                             else if (idx === 1) rankIcon = <i className="fas fa-medal text-slate-400 text-2xl drop-shadow-sm"></i>;
                                             else if (idx === 2) rankIcon = <i className="fas fa-medal text-amber-700 text-2xl drop-shadow-sm"></i>;
-                                            
                                             return (
                                                 <tr key={user.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                                                     <td className="p-4 text-center">{rankIcon}</td>
@@ -854,32 +860,19 @@
                                         <i className="fas fa-hand-holding-medical text-2xl text-emerald-600"></i>
                                     </div>
                                     <h2 className="text-2xl font-bold text-slate-800">Input Poin Manual</h2>
-                                    <p className="text-sm text-slate-500 mt-1">Tambahkan poin untuk aktivitas offline tanpa karyawan perlu mengunggah foto.</p>
+                                    <p className="text-sm text-slate-500 mt-1">Tambahkan poin aktivitas offline, atau berikan penalti.</p>
                                 </div>
-
                                 <form onSubmit={handleManualSubmit} className="space-y-5">
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-1">1. Pilih Karyawan</label>
-                                        <select 
-                                            value={manualUser} 
-                                            onChange={(e) => setManualUser(e.target.value)}
-                                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
-                                            required
-                                        >
+                                        <select value={manualUser} onChange={(e) => setManualUser(e.target.value)} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium" required>
                                             <option value="" disabled>-- Pilih Akun Karyawan --</option>
-                                            {userProfiles.map(u => (
-                                                <option key={u.id} value={u.id}>@{u.username} (Saat ini: {u.totalPoints} Pts)</option>
-                                            ))}
+                                            {userProfiles.map(u => ( <option key={u.id} value={u.id}>@{u.username} (Saat ini: {u.totalPoints} Pts)</option> ))}
                                         </select>
                                     </div>
-
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-1">2. Pilih Kategori Aktivitas</label>
-                                        <select 
-                                            value={manualActivity} 
-                                            onChange={(e) => setManualActivity(e.target.value)}
-                                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
-                                        >
+                                        <select value={manualActivity} onChange={(e) => setManualActivity(e.target.value)} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium">
                                             <optgroup label="A. DAILY POINT">
                                               <option value="Aktivitas Fisik">Aktivitas Fisik</option>
                                               <option value="Pola Makan Sehat">Pola Makan Sehat</option>
@@ -902,23 +895,11 @@
                                             </optgroup>
                                         </select>
                                     </div>
-
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-1">3. Jumlah Poin</label>
-                                        <input 
-                                            type="number" 
-                                            value={manualPoints}
-                                            onChange={(e) => setManualPoints(e.target.value)}
-                                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-600 text-lg"
-                                            required
-                                        />
+                                        <input type="number" value={manualPoints} onChange={(e) => setManualPoints(e.target.value)} className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-600 text-lg" required />
                                     </div>
-
-                                    <button 
-                                        type="submit" 
-                                        disabled={isManualSubmitting}
-                                        className={`w-full font-bold py-4 rounded-xl text-white shadow-md transition ${isManualSubmitting ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-                                    >
+                                    <button type="submit" disabled={isManualSubmitting} className={`w-full font-bold py-4 rounded-xl text-white shadow-md transition ${isManualSubmitting ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                                         {isManualSubmitting ? <><i className="fas fa-spinner fa-spin mr-2"></i> Menyimpan...</> : <><i className="fas fa-paper-plane mr-2"></i> Tambahkan Poin ke Karyawan</>}
                                     </button>
                                 </form>
@@ -948,14 +929,7 @@
                                                 <td className="p-4 flex justify-end gap-2">
                                                     {editPasswordUser?.id === user.id ? (
                                                         <div className="flex items-center gap-1 bg-blue-50 p-1 rounded border border-blue-100">
-                                                            <input 
-                                                                type="text" 
-                                                                value={newPasswordInput} 
-                                                                onChange={e => setNewPasswordInput(e.target.value)} 
-                                                                placeholder="Ketik password baru..." 
-                                                                className="border border-slate-300 rounded px-2 py-1 text-xs outline-none w-32"
-                                                                autoFocus
-                                                            />
+                                                            <input type="text" value={newPasswordInput} onChange={e => setNewPasswordInput(e.target.value)} placeholder="Ketik password baru..." className="border border-slate-300 rounded px-2 py-1 text-xs outline-none w-32" autoFocus />
                                                             <button onClick={confirmEditPassword} className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1 rounded text-xs font-bold transition">Simpan</button>
                                                             <button onClick={() => setEditPasswordUser(null)} className="bg-slate-300 hover:bg-slate-400 text-slate-700 px-2 py-1 rounded text-xs font-bold transition">Batal</button>
                                                         </div>
