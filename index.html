@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fit for Rewards App</title>
+    
+    <!-- Memuat Tailwind CSS untuk Desain -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Memuat FontAwesome untuk Ikon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Memuat React (Versi Stabil) -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
+
+    <!-- HANYA memuat Core dan Realtime Database -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-100 font-sans text-slate-800">
+
+    <div id="root"></div>
+
+    <script type="text/babel" data-presets="env,react">
+        const { useState, useEffect, useRef } = React;
+
+        // =========================================================================
+        // 1. FIREBASE CONFIGURATION (rewardkantor)
+        // =========================================================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyDicvGkP6ZSQxjIEeHfTypDtB3Qe_Xj8RQ",
+            authDomain: "rewardkantor.firebaseapp.com",
+            databaseURL: "https://rewardkantor-default-rtdb.asia-southeast1.firebasedatabase.app", 
+            projectId: "rewardkantor",
+            storageBucket: "rewardkantor.firebasestorage.app",
+            messagingSenderId: "895087903070",
+            appId: "1:895087903070:web:bb129813e0d423ce844fcf"
+        };
+        // =========================================================================
+
+        // Inisialisasi Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        
+        const db = firebase.database();
+        const profilesRef = db.ref('data/profiles');
+        const submissionsRef = db.ref('data/submissions');
+
+        function App() {
+            const [profiles, setProfiles] = useState([]);
+            const [submissions, setSubmissions] = useState([]);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [view, setView] = useState('login');
+            const [username, setUsername] = useState('');
+            const [password, setPassword] = useState('');
+            const [errorMsg, setErrorMsg] = useState('');
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                let isTimeout = false;
+                const fallbackTimer = setTimeout(() => {
+                    isTimeout = true;
+                    setIsLoading(false);
+                    setErrorMsg("Koneksi Database lambat. Pastikan Rules Firebase Anda sudah diset ke true.");
+                }, 10000);
+
+                const onProfilesChange = snapshot => {
+                    if (isTimeout) return;
+                    clearTimeout(fallbackTimer);
+
+                    const data = snapshot.val() || {};
+                    const fetchedProfiles = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                    setProfiles(fetchedProfiles);
+                    setIsLoading(false);
+                    
+                    // Auto-create admin jika belum ada
+                    if (!fetchedProfiles.find(p => p.username === 'admin')) {
+                        profilesRef.push({ username: 'admin', password: 'adminsehat', role: 'admin', totalPoints: 0 });
+                    }
+                };
+                
+                profilesRef.on('value', onProfilesChange, (error) => {
+                    if (isTimeout) return;
+                    clearTimeout(fallbackTimer);
+                    
+                    if (error.message && error.message.includes("permission_denied")) {
+                        setErrorMsg("Akses Database Ditolak! Izin Rules Firebase belum dibuka.");
+                    } else {
+                        setErrorMsg("Gagal terhubung ke database.");
+                    }
+                    setIsLoading(false);
+                });
+
+                const onSubsChange = snapshot => {
+                    const data = snapshot.val() || {};
+                    const fetchedSubs = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+                    fetchedSubs.sort((a, b) => b.timestamp - a.timestamp);
+                    setSubmissions(fetchedSubs);
+                };
+                
+                submissionsRef.on('value', onSubsChange);
+
+                return () => {
+                    profilesRef.off('value', onProfilesChange);
+                    submissionsRef.off('value', onSubsChange);
+                };
+            }, []);
+
+            useEffect(() => {
+                if (currentUser) {
+                    const updatedProfile = profiles.find(p => p.id === currentUser.id);
+                    if (updatedProfile) setCurrentUser(updatedProfile);
+                }
+            }, [profiles]);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                setErrorMsg('');
+                const foundUser = profiles.find(p => p.username === username && p.password === password);
+                if (foundUser) {
+                    setCurrentUser(foundUser);
+                    setView('dashboard');
+                    setUsername('');
+                    setPassword('');
+                } else {
+                    setErrorMsg('Username atau password salah.');
+                }
+            };
+
+            const handleRegister = async (e) => {
+                e.preventDefault();
+                setErrorMsg('');
+                if (profiles.find(p => p.username === username)) {
+                    setErrorMsg('Username sudah dipakai.');
+                    return;
+                }
+                try {
+                    const newProfileRef = profilesRef.push();
+                    await newProfileRef.set({ username, password, role: 'user', totalPoints: 0 });
+                    setCurrentUser({ id: newProfileRef.key, username, role: 'user', totalPoints: 0 });
+                    setView('dashboard');
+                    setUsername('');
+                    setPassword('');
+                } catch (err) {
+                    setErrorMsg('Gagal mendaftar. Pastikan Rules Firebase true.');
+                }
+            };
+
+            const handleLogout = () => {
+                setCurrentUser(null);
+                setView('login');
+            };
+
+            if (isLoading) {
+                return (
+                    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100">
+                        <i className="fas fa-spinner fa-spin text-4xl text-emerald-500 mb-4"></i>
+                        <p className="text-slate-500 font-medium">Memuat Aplikasi...</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div>
+                    <header className="bg-emerald-600 text-white shadow-md sticky top-0 z-10">
+                        <div className="max-w-5xl mx-auto px-4 py-3 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                                <i className="fas fa-heartbeat text-2xl"></i>
+                                <h1 className="text-xl font-bold tracking-wide">Fit for Rewards</h1>
+                            </div>
+                            {currentUser && (
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 bg-emerald-700 px-3 py-1.5 rounded-full text-sm font-medium">
+                                        <i className="fas fa-user"></i>
+                                        {currentUser.username} ({currentUser.role === 'admin' ? 'Admin' : 'User'})
+                                    </div>
+                                    <button onClick={handleLogout} className="hover:bg-emerald-700 p-2 rounded-full transition" title="Logout">
+                                        <i className="fas fa-sign-out-alt"></i>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </header>
+
+                    <main className="max-w-5xl mx-auto px-4 py-8">
+                        {errorMsg && view === 'login' && <div className="max-w-md mx-auto bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-200 mb-4 text-center">{errorMsg}</div>}
+                        {view === 'login' && <AuthForm type="login" username={username} setUsername={setUsername} password={password} setPassword={setPassword} onSubmit={handleLogin} switchView={() => { setView('register'); setErrorMsg(''); }} />}
+                        {view === 'register' && <AuthForm type="register" username={username} setUsername={setUsername} password={password} setPassword={setPassword} onSubmit={handleRegister} switchView={() => { setView('login'); setErrorMsg(''); }} />}
+                        {view === 'dashboard' && currentUser?.role === 'user' && <UserDashboard currentUser={currentUser} submissions={submissions.filter(s => s.userId === currentUser.id)} profiles={profiles} db={db} />}
+                        {view === 'dashboard' && currentUser?.role === 'admin' && <AdminDashboard submissions={submissions} profiles={profiles} db={db} />}
+                    </main>
+                </div>
+            );
+        }
+
+        function AuthForm({ type, username, setUsername, password, setPassword, onSubmit, switchView }) {
+            const isLogin = type === 'login';
+            return (
+                <div className="max-w-md mx-auto bg-white rounded-2xl shadow-xl overflow-hidden mt-10 border border-slate-100">
+                    <div className="bg-emerald-50 p-6 text-center border-b border-emerald-100">
+                        <div className="bg-emerald-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg text-white text-2xl">
+                            <i className="fas fa-shield-alt"></i>
+                        </div>
+                        <h2 className="text-2xl font-bold text-slate-800">{isLogin ? 'Masuk ke Akun' : 'Daftar Karyawan Baru'}</h2>
+                        <p className="text-slate-500 mt-2 text-sm">{isLogin ? 'Masukkan username dan password.' : 'Buat akun untuk mulai kumpulkan poin.'}</p>
+                    </div>
+                    <form onSubmit={onSubmit} className="p-6 space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Username</label>
+                            <input type="text" value={username} onChange={(e) => setUsername(e.target.value.toLowerCase())} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" required placeholder="Misal: budi_s" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+                            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" required placeholder="••••••••" />
+                        </div>
+                        <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-lg transition shadow-md mt-4">{isLogin ? 'Masuk' : 'Daftar Sekarang'}</button>
+                    </form>
+                    <div className="bg-slate-50 p-4 text-center border-t border-slate-100">
+                        <button onClick={switchView} className="text-emerald-600 hover:text-emerald-800 text-sm font-medium transition">{isLogin ? 'Belum punya akun? Daftar di sini.' : 'Sudah punya akun? Masuk di sini.'}</button>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- KOMPONEN USER ---
+        function UserDashboard({ currentUser, submissions, profiles, db }) {
+            const [activityType, setActivityType] = useState('Aktivitas Fisik');
+            const [imageFile, setImageFile] = useState(null);
+            const [imageBase64, setImageBase64] = useState('');
+            const [isSubmitting, setIsSubmitting] = useState(false);
+            const [selectedImage, setSelectedImage] = useState(null);
+            
+            // STATE BARU: Untuk menggantikan fitur alert/confirm yang diblokir sistem
+            const [localMessage, setLocalMessage] = useState('');
+            const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+            
+            const fileInputRef = useRef(null);
+
+            const userProfiles = profiles ? profiles.filter(p => p.role === 'user').sort((a, b) => b.totalPoints - a.totalPoints) : [];
+            const currentUserRank = userProfiles.findIndex(p => p.id === currentUser.id) + 1;
+            
+            let clusterLabel = '';
+            if (currentUserRank >= 1 && currentUserRank <= 5) clusterLabel = '🏆 Top 5';
+            else if (currentUserRank >= 6 && currentUserRank <= 10) clusterLabel = '⭐ Top 10';
+
+            const handleImageChange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                if (file.size > 5 * 1024 * 1024) {
+                    setLocalMessage("⚠️ Ukuran foto terlalu besar! Maksimal 5MB.");
+                    setTimeout(() => setLocalMessage(''), 5000);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 500;
+                        canvas.width = MAX_WIDTH;
+                        canvas.height = img.height * (MAX_WIDTH / img.width);
+                        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                        setImageBase64(canvas.toDataURL('image/jpeg', 0.7)); 
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                if (!imageBase64) return;
+                setIsSubmitting(true);
+
+                // Rekomendasi Poin Dasar
+                let recommendedPts = 0;
+                if (activityType === 'Aktivitas Fisik') recommendedPts = 40;
+                else if (activityType === 'Pola Makan Sehat') recommendedPts = 20;
+                else if (activityType === 'Minum Air') recommendedPts = 10;
+                else if (activityType === 'Tidur & Pemulihan') recommendedPts = 10;
+                else if (activityType === 'Partisipasi Program') recommendedPts = 40;
+                else if (activityType === 'Bonus Ajak Keluarga') recommendedPts = 20; 
+                else if (activityType === 'Challenge: Mudah') recommendedPts = 50;
+                else if (activityType === 'Challenge: Sedang') recommendedPts = 100;
+                else if (activityType === 'Challenge: Sulit') recommendedPts = 150;
+                else if (activityType === 'Challenge: Sangat Sulit') recommendedPts = 200;
+
+                try {
+                    await db.ref('data/submissions').push({
+                        userId: currentUser.id, 
+                        username: currentUser.username, 
+                        activity: activityType,
+                        evidenceBase64: imageBase64, 
+                        status: 'pending', 
+                        pointsAwarded: 0,
+                        aiRecommendedPoints: recommendedPts,
+                        timestamp: Date.now()
+                    });
+
+                    setImageBase64(''); 
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                    
+                    setLocalMessage("✅ Berhasil! Bukti telah terkirim ke antrean Admin.");
+                    setTimeout(() => setLocalMessage(''), 5000);
+                } catch (err) { 
+                    setLocalMessage("⚠️ Gagal mengirim data. Pastikan koneksi internet stabil.");
+                    setTimeout(() => setLocalMessage(''), 5000);
+                } finally { 
+                    setIsSubmitting(false); 
+                }
+            };
+
+            // FUNGSI HAPUS (DELETE) YANG SUDAH DIPERBAIKI TOTAL (Tanpa window.confirm)
+            const handleDelete = async (subId, e) => {
+                e.preventDefault();
+                e.stopPropagation(); 
+                setDeleteConfirmId(subId); // Munculkan tombol konfirmasi inline
+            };
+
+            const confirmDelete = async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!deleteConfirmId) return;
+                try {
+                    await db.ref('data/submissions/' + deleteConfirmId).remove();
+                    setLocalMessage("✅ Foto bukti berhasil dihapus/dibatalkan.");
+                    setTimeout(() => setLocalMessage(''), 5000);
+                } catch (err) {
+                    console.error("Delete error: ", err);
+                    setLocalMessage("⚠️ Gagal menghapus data. Pastikan internet stabil.");
+                    setTimeout(() => setLocalMessage(''), 5000);
+                } finally {
+                    setDeleteConfirmId(null);
+                }
+            };
+
+            return (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="md:col-span-1 space-y-6">
+                        {/* Box Poin Total */}
+                        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden">
+                            <div className="relative z-10">
+                                <div className="flex justify-between items-start mb-1">
+                                    <p className="text-emerald-100 font-medium">Total Poin Kamu</p>
+                                    {clusterLabel && <span className="bg-white/20 px-2 py-1 rounded-md text-xs font-bold">{clusterLabel}</span>}
+                                </div>
+                                <div className="flex items-end gap-2">
+                                    <h2 className="text-5xl font-bold">{currentUser.totalPoints || 0}</h2>
+                                    <span className="text-emerald-100 text-lg mb-1">pts</span>
+                                </div>
+                            </div>
+                            <i className="fas fa-trophy absolute -right-4 -bottom-4 text-emerald-400 opacity-30" style={{fontSize: '100px'}}></i>
+                        </div>
+
+                        {/* Form Submit Bukti */}
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><i className="fas fa-camera text-emerald-500"></i> Submit Bukti</h3>
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div>
+                                  <label className="block text-sm font-medium text-slate-700 mb-1">Kategori Aktivitas</label>
+                                  <select 
+                                    value={activityType}
+                                    onChange={(e) => setActivityType(e.target.value)}
+                                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none bg-white font-medium text-slate-700"
+                                  >
+                                    <optgroup label="A. DAILY POINT">
+                                      <option value="Aktivitas Fisik">Aktivitas Fisik</option>
+                                      <option value="Pola Makan Sehat">Pola Makan Sehat</option>
+                                      <option value="Minum Air">Minum Air</option>
+                                      <option value="Tidur & Pemulihan">Tidur & Pemulihan</option>
+                                      <option value="Partisipasi Program">Partisipasi Program</option>
+                                    </optgroup>
+                                    <optgroup label="B. BONUS & CHALLENGE POINT">
+                                      <option value="Bonus Ajak Keluarga">Bonus Ajak Keluarga</option>
+                                      <option value="Challenge Juni">Challenge Juni</option>
+                                      <option value="Challenge Juli">Challenge Juli</option>
+                                      <option value="Challenge Agustus">Challenge Agustus</option>
+                                      <option value="Challenge September">Challenge September</option>
+                                      <option value="Challenge Oktober">Challenge Oktober</option>
+                                      <option value="Challenge November">Challenge November</option>
+                                      <option value="Challenge Desember">Challenge Desember</option>
+                                      <option value="Challenge Januari">Challenge Januari</option>
+                                      <option value="Challenge Februari">Challenge Februari</option>
+                                    </optgroup>
+                                  </select>
+                                </div>
+                                <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center relative hover:bg-slate-50 cursor-pointer">
+                                    <input type="file" accept="image/jpeg, image/png" onChange={handleImageChange} ref={fileInputRef} required className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"/>
+                                    {!imageBase64 ? (
+                                        <div className="text-slate-500"><i className="fas fa-image text-3xl mb-2"></i><br/><span className="text-sm">Klik untuk Pilih Foto</span><br/><span className="text-xs text-slate-400 font-medium">(Maks. 5MB, format JPG/PNG)</span></div>
+                                    ) : ( <img src={imageBase64} className="h-32 object-contain mx-auto rounded-lg" /> )}
+                                </div>
+                                
+                                <button type="submit" disabled={isSubmitting || !imageBase64} className={`w-full font-bold py-3 px-4 rounded-lg text-white relative z-20 shadow-md ${isSubmitting || !imageBase64 ? 'bg-slate-300' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                                    {isSubmitting ? <><i className="fas fa-spinner fa-spin mr-2"></i> Mengirim...</> : <><i className="fas fa-paper-plane mr-2"></i> Kirim Bukti</>}
+                                </button>
+                                
+                                {/* PESAN NOTIFIKASI BERHASIL / GAGAL */}
+                                {localMessage && (
+                                    <div className={`text-sm text-center mt-3 font-bold py-2 px-3 rounded-lg ${localMessage.includes('⚠️') ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
+                                        {localMessage}
+                                    </div>
+                                )}
+
+                                {/* PERUBAHAN: Teks Notifikasi Permanen di Bawah Tombol */}
+                                <p className="text-xs text-amber-600 text-center mt-2 font-medium bg-amber-50 py-2 px-2 rounded-lg border border-amber-200">
+                                    <i className="fas fa-info-circle mr-1"></i> Anda sudah yakin? Periksa kembali, bukti yang dikirimkan harus sesuai dengan kategorinya.
+                                </p>
+
+                            </form>
+                        </div>
+                    </div>
+
+                    <div className="md:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 h-fit">
+                        <h3 className="font-bold text-slate-800 mb-4 border-b pb-2">Riwayat Submission Anda</h3>
+                        {submissions.length === 0 ? <p className="text-center text-slate-400 py-10">Belum ada aktivitas. Yuk mulai gaya hidup sehat!</p> : 
+                            <div className="space-y-4">
+                                {submissions.map(sub => (
+                                    <div key={sub.id} className="flex gap-4 p-4 border rounded-xl bg-slate-50 group hover:shadow-sm transition">
+                                        {/* PERUBAHAN TAMPILAN GAMBAR DIHAPUS */}
+                                        {sub.evidenceBase64 && sub.evidenceBase64 !== "" ? (
+                                            <img src={sub.evidenceBase64} onClick={() => setSelectedImage(sub.evidenceBase64)} className="w-20 h-20 object-cover rounded-lg cursor-pointer hover:opacity-80 transition shadow-sm" title="Klik untuk memperbesar foto" />
+                                        ) : (
+                                            <div className="w-20 h-20 bg-slate-200 rounded-lg flex flex-col items-center justify-center text-slate-400 px-1 border border-slate-300 shadow-inner">
+                                                {sub.aiNote === "Input Manual oleh Admin" ? (
+                                                    <><i className="fas fa-clipboard-check text-xl mb-1"></i><span className="text-[10px] text-center leading-tight font-bold">Input Admin</span></>
+                                                ) : (
+                                                    <><i className="fas fa-image-slash text-xl mb-1 opacity-50"></i><span className="text-[10px] text-center leading-tight font-bold">Foto Dihapus<br/>Admin</span></>
+                                                )}
+                                            </div>
+                                        )}
+                                        <div className="flex-1">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <h4 className="font-bold text-slate-800">{sub.activity}</h4>
+                                                    <p className="text-xs text-slate-500 mb-2">{new Date(sub.timestamp).toLocaleString('id-ID')}</p>
+                                                    <span className={`text-xs font-bold px-2 py-1 rounded inline-block shadow-sm ${sub.status === 'pending' ? 'bg-amber-100 text-amber-700' : sub.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                                        {sub.status === 'approved' ? `Disetujui (+${sub.pointsAwarded} Pts)` : sub.status === 'pending' ? '⏳ Menunggu Validasi Admin' : '❌ Ditolak Admin'}
+                                                    </span>
+                                                </div>
+                                                
+                                                {/* PERMINTAAN 2: TOMBOL DELETE (Dengan Konfirmasi Inline) */}
+                                                {sub.status === 'pending' && (
+                                                    deleteConfirmId === sub.id ? (
+                                                        <div className="flex flex-col gap-1 items-end z-10 relative">
+                                                            <span className="text-[10px] text-red-500 font-bold bg-red-50 px-2 rounded">Yakin hapus?</span>
+                                                            <div className="flex gap-1">
+                                                                <button onClick={confirmDelete} className="bg-red-500 hover:bg-red-600 text-white font-bold text-xs px-3 py-1.5 rounded shadow-sm transition">Ya</button>
+                                                                <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-3 py-1.5 rounded shadow-sm transition">Batal</button>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <button onClick={(e) => handleDelete(sub.id, e)} className="text-red-400 hover:text-white hover:bg-red-500 p-3 rounded-lg transition shadow-sm z-10 relative bg-white border border-red-100" title="Batalkan/Hapus Submission">
+                                                            <i className="fas fa-trash-alt"></i> Hapus
+                                                        </button>
+                                                    )
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        }
+                    </div>
+
+                    {/* Pop-up Perbesar Gambar */}
+                    {selectedImage && (
+                        <div className="fixed inset-0 bg-slate-900/90 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setSelectedImage(null)}>
+                            <div className="relative max-w-4xl w-full flex justify-center">
+                                <img src={selectedImage} className="max-w-full max-h-[90vh] rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()} />
+                                <button onClick={() => setSelectedImage(null)} className="absolute -top-4 -right-4 md:right-0 bg-red-500 hover:bg-red-600 text-white w-10 h-10 rounded-full flex items-center justify-center shadow-lg transition z-10">
+                                    <i className="fas fa-times text-xl"></i>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // --- KOMPONEN ADMIN ---
+        function AdminDashboard({ submissions, profiles, db }) {
+            const [activeTab, setActiveTab] = useState('pending');
+            const [searchHistory, setSearchHistory] = useState(''); 
+            
+            const [manualUser, setManualUser] = useState('');
+            const [manualActivity, setManualActivity] = useState('Partisipasi Program');
+            const [manualPoints, setManualPoints] = useState('40');
+            const [isManualSubmitting, setIsManualSubmitting] = useState(false);
+
+            // STATE BARU: Untuk notifikasi UI menggantikan alert/confirm bawaan browser
+            const [adminMessage, setAdminMessage] = useState('');
+            const [showConfirmClean, setShowConfirmClean] = useState(false);
+
+            const pendingSubs = submissions.filter(s => s.status === 'pending');
+            const historySubs = submissions.filter(s => s.status !== 'pending');
+            const userProfiles = profiles.filter(p => p.role === 'user').sort((a, b) => b.totalPoints - a.totalPoints);
+
+            useEffect(() => {
+                let pts = 0;
+                if (manualActivity === 'Aktivitas Fisik') pts = 40;
+                else if (manualActivity === 'Pola Makan Sehat') pts = 20;
+                else if (manualActivity === 'Minum Air') pts = 10;
+                else if (manualActivity === 'Tidur & Pemulihan') pts = 10;
+                else if (manualActivity === 'Partisipasi Program') pts = 40;
+                else if (manualActivity === 'Bonus Ajak Keluarga') pts = 20; 
+                else if (manualActivity === 'Challenge: Mudah') pts = 50;
+                else if (manualActivity === 'Challenge: Sedang') pts = 100;
+                else if (manualActivity === 'Challenge: Sulit') pts = 150;
+                else if (manualActivity === 'Challenge: Sangat Sulit') pts = 200;
+                setManualPoints(pts.toString());
+            }, [manualActivity]);
+
+            const filteredHistory = historySubs.filter(s => s.username.toLowerCase().includes(searchHistory.toLowerCase()) || s.activity.toLowerCase().includes(searchHistory.toLowerCase()));
+            
+            const groupedHistory = filteredHistory.reduce((acc, curr) => {
+                if (!acc[curr.username]) acc[curr.username] = [];
+                acc[curr.username].push(curr);
+                return acc;
+            }, {});
+            const sortedHistoryUsers = Object.keys(groupedHistory).sort();
+
+            const handleAction = async (sub, actionType, customPoints = 0) => {
+                const finalPoints = actionType === 'approve' ? customPoints : 0;
+                await db.ref('data/submissions/' + sub.id).update({ 
+                    status: actionType === 'approve' ? 'approved' : 'rejected', 
+                    pointsAwarded: finalPoints 
+                });
+                
+                if (actionType === 'approve') {
+                    const userProfile = profiles.find(p => p.id === sub.userId);
+                    if (userProfile) {
+                        await db.ref('data/profiles/' + userProfile.id).update({ 
+                            totalPoints: (userProfile.totalPoints || 0) + Number(finalPoints) 
+                        });
+                    }
+                }
+            };
+
+            const handleManualSubmit = async (e) => {
+                e.preventDefault();
+                if(!manualUser || manualPoints === '') {
+                    setAdminMessage("⚠️ Harap pilih karyawan dan masukkan poin!");
+                    setTimeout(() => setAdminMessage(''), 4000);
+                    return;
+                }
+                
+                setIsManualSubmitting(true);
+                try {
+                    const userProf = profiles.find(p => p.id === manualUser);
+                    if(!userProf) throw new Error("Karyawan tidak ditemukan");
+                    
+                    await db.ref('data/submissions').push({
+                        userId: userProf.id,
+                        username: userProf.username,
+                        activity: manualActivity,
+                        evidenceBase64: "", 
+                        status: 'approved',
+                        pointsAwarded: Number(manualPoints),
+                        aiRecommendedPoints: Number(manualPoints),
+                        aiNote: "Input Manual oleh Admin", 
+                        timestamp: Date.now()
+                    });
+                    
+                    await db.ref('data/profiles/' + userProf.id).update({
+                        totalPoints: (userProf.totalPoints || 0) + Number(manualPoints)
+                    });
+                    
+                    setAdminMessage(`✅ Berhasil menambahkan ${manualPoints} poin ke akun @${userProf.username}!`);
+                    setTimeout(() => setAdminMessage(''), 5000);
+                    setManualUser('');
+                } catch(err) {
+                    setAdminMessage("⚠️ Gagal menginput poin manual.");
+                    setTimeout(() => setAdminMessage(''), 5000);
+                    console.error(err);
+                } finally {
+                    setIsManualSubmitting(false);
+                }
+            };
+
+            // PERBAIKAN: Mengganti confirm() bawaan dengan state popup agar tidak diblokir browser
+            const handleCleanup = async () => {
+                setShowConfirmClean(true);
+            };
+
+            const executeCleanup = async () => {
+                setShowConfirmClean(false);
+                let cleanedCount = 0;
+                for (const sub of submissions) {
+                    if (sub.status !== 'pending' && sub.evidenceBase64 !== "") {
+                        await db.ref('data/submissions').child(sub.id).update({ evidenceBase64: "" });
+                        cleanedCount++;
+                    }
+                }
+                setAdminMessage(`🧹 Pembersihan Selesai! ${cleanedCount} gambar foto telah berhasil dihapus dari database.`);
+                setTimeout(() => setAdminMessage(''), 6000);
+            };
+
+            const handleDownload = (base64, username, timestamp) => {
+                try {
+                    const a = document.createElement('a');
+                    a.href = base64;
+                    a.download = `FitRewards_${username}_${new Date(timestamp).toISOString().split('T')[0]}.jpg`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                } catch (error) {
+                    setAdminMessage("⚠️ Browser memblokir unduhan. Silakan klik kanan pada foto dan pilih 'Save image as...'");
+                    setTimeout(() => setAdminMessage(''), 5000);
+                }
+            };
+
+            return (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="flex overflow-x-auto items-center bg-slate-50 border-b border-slate-200">
+                        <button className={`px-5 py-4 font-bold whitespace-nowrap border-b-2 ${activeTab==='pending'?'bg-white text-emerald-600 border-emerald-600':'text-slate-500 border-transparent hover:bg-slate-100'}`} onClick={() => setActiveTab('pending')}>
+                            Validasi Harian ({pendingSubs.length})
+                        </button>
+                        <button className={`px-5 py-4 font-bold whitespace-nowrap border-b-2 ${activeTab==='history'?'bg-white text-emerald-600 border-emerald-600':'text-slate-500 border-transparent hover:bg-slate-100'}`} onClick={() => setActiveTab('history')}>
+                            Riwayat
+                        </button>
+                        <button className={`px-5 py-4 font-bold whitespace-nowrap border-b-2 ${activeTab==='leaderboard'?'bg-white text-emerald-600 border-emerald-600':'text-slate-500 border-transparent hover:bg-slate-100'}`} onClick={() => setActiveTab('leaderboard')}>
+                            Leaderboard
+                        </button>
+                        <button className={`px-5 py-4 font-bold whitespace-nowrap border-b-2 ${activeTab==='manual'?'bg-white text-emerald-600 border-emerald-600':'text-slate-500 border-transparent hover:bg-slate-100'}`} onClick={() => setActiveTab('manual')}>
+                            <i className="fas fa-plus-circle mr-1"></i> Input Manual
+                        </button>
+                        <button className={`px-5 py-4 font-bold whitespace-nowrap border-b-2 ${activeTab==='users'?'bg-white text-emerald-600 border-emerald-600':'text-slate-500 border-transparent hover:bg-slate-100'}`} onClick={() => setActiveTab('users')}>
+                            Manajemen Akun
+                        </button>
+                        <button className={`px-5 py-4 font-bold whitespace-nowrap border-b-2 ${activeTab==='rules'?'bg-white text-blue-600 border-blue-600':'text-blue-500 border-transparent hover:bg-blue-50'}`} onClick={() => setActiveTab('rules')}>
+                            <i className="fas fa-book-open mr-1"></i> Aturan Poin
+                        </button>
+                        
+                        <div className="ml-auto pr-4">
+                            <button onClick={handleCleanup} className="bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-amber-200 transition shadow-sm flex items-center gap-2">
+                                <i className="fas fa-broom"></i> Bersihkan Memori
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* NOTIFIKASI ADMIN */}
+                    {adminMessage && (
+                        <div className={`mx-6 mt-6 p-4 rounded-xl font-bold text-center border shadow-sm ${adminMessage.includes('⚠️') ? 'bg-red-50 text-red-600 border-red-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                            {adminMessage}
+                        </div>
+                    )}
+
+                    {/* KONFIRMASI PEMBERSIHAN MEMORI */}
+                    {showConfirmClean && (
+                        <div className="mx-6 mt-6 p-6 bg-amber-50 border-2 border-amber-200 rounded-xl text-center shadow-md animate-pulse">
+                            <i className="fas fa-exclamation-triangle text-4xl text-amber-500 mb-3"></i>
+                            <h3 className="text-xl font-bold text-slate-800 mb-2">Hapus Semua Foto Memori?</h3>
+                            <p className="text-sm text-slate-600 mb-6">Tindakan ini akan <b>MENGHAPUS SEMUA GAMBAR FOTO LAMA</b> dari database secara permanen. Data riwayat (nama aktivitas & poin) karyawan akan tetap aman. Lanjutkan?</p>
+                            <div className="flex gap-4 justify-center">
+                                <button onClick={executeCleanup} className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-6 rounded-lg shadow-sm transition">Ya, Bersihkan Memori</button>
+                                <button onClick={() => setShowConfirmClean(false)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2 px-6 rounded-lg shadow-sm transition">Batal</button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="p-6 bg-slate-50 min-h-[500px]">
+                        
+                        {/* TAB MENUNGGU VALIDASI (PENDING) */}
+                        {activeTab === 'pending' && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {pendingSubs.length === 0 ? <div className="col-span-2 text-center py-12"><i className="fas fa-clipboard-check text-5xl text-emerald-200 mb-4"></i><p className="text-slate-500 font-medium">Semua submission sudah divalidasi!</p></div> : pendingSubs.map(sub => (
+                                    <div key={sub.id} className="border border-slate-200 rounded-xl flex flex-col relative overflow-hidden bg-white shadow-sm hover:shadow-md transition">
+                                        
+                                        <div className="relative">
+                                            {sub.evidenceBase64 && sub.evidenceBase64 !== "" ? (
+                                                <img src={sub.evidenceBase64} className="w-full h-56 object-cover bg-slate-100 border-b border-slate-200" />
+                                            ) : (
+                                                <div className="w-full h-56 bg-slate-100 border-b border-slate-200 flex flex-col items-center justify-center text-slate-400">
+                                                    <i className="fas fa-image-slash text-3xl mb-2"></i><span>Foto Dihapus</span>
+                                                </div>
+                                            )}
+
+                                            {sub.evidenceBase64 && sub.evidenceBase64 !== "" && (
+                                                <button onClick={() => handleDownload(sub.evidenceBase64, sub.username, sub.timestamp)} 
+                                                    className="absolute bottom-3 right-3 bg-slate-900/90 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg transition flex items-center gap-2 text-sm font-bold backdrop-blur-sm border border-slate-600">
+                                                    <i className="fas fa-download"></i> Unduh Foto
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="p-5 flex-1 flex flex-col">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100">@{sub.username}</span>
+                                                <span className="text-xs text-slate-400 font-medium">{new Date(sub.timestamp).toLocaleString('id-ID')}</span>
+                                            </div>
+                                            
+                                            <h4 className="font-bold text-lg text-slate-800">{sub.activity}</h4>
+                                            
+                                            <div className="mt-4 pt-4 border-t border-slate-100 flex gap-3 items-center">
+                                                <div className="flex flex-col w-24">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Isi Poin</label>
+                                                    <input type="number" defaultValue={sub.aiRecommendedPoints} id={`pts-${sub.id}`} className="w-full px-2 py-2 border-2 border-slate-200 focus:border-emerald-500 rounded-lg font-bold text-center text-lg outline-none transition" />
+                                                </div>
+                                                <button onClick={() => handleAction(sub, 'approve', Number(document.getElementById(`pts-${sub.id}`).value))} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow-sm transition flex items-center justify-center gap-2 mt-4">
+                                                    <i className="fas fa-check-circle"></i> Setujui
+                                                </button>
+                                                <button onClick={() => handleAction(sub, 'reject')} className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold py-3 px-4 rounded-lg transition mt-4" title="Tolak">
+                                                    <i className="fas fa-times"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        {/* TAB RIWAYAT VALIDASI */}
+                        {activeTab === 'history' && (
+                            <div className="space-y-6">
+                                <div className="relative max-w-2xl mx-auto">
+                                    <i className="fas fa-search absolute left-4 top-4 text-slate-400"></i>
+                                    <input 
+                                        type="text" 
+                                        placeholder="Cari berdasarkan username Karyawan atau aktivitas..." 
+                                        value={searchHistory}
+                                        onChange={(e) => setSearchHistory(e.target.value)}
+                                        className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm"
+                                    />
+                                </div>
+                                
+                                {sortedHistoryUsers.length === 0 ? (
+                                    <div className="text-center py-10 text-slate-500">
+                                        <i className="fas fa-folder-open text-4xl mb-3 text-slate-300"></i>
+                                        <p>Tidak ada riwayat ditemukan.</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {sortedHistoryUsers.map(user => (
+                                            <div key={user} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-fit">
+                                                <div className="bg-emerald-600 px-4 py-3 border-b border-emerald-700 flex justify-between items-center">
+                                                    <span className="font-bold text-white text-lg"><i className="fas fa-user-circle mr-2"></i>@{user}</span>
+                                                    <span className="text-emerald-100 text-xs font-bold">{groupedHistory[user].length} Aktivitas</span>
+                                                </div>
+                                                <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                                                    {groupedHistory[user].map(sub => (
+                                                        <div key={sub.id} className="p-4 flex gap-4 hover:bg-slate-50 transition">
+                                                            {/* PERUBAHAN TAMPILAN GAMBAR DIHAPUS */}
+                                                            {sub.evidenceBase64 && sub.evidenceBase64 !== "" ? (
+                                                                <img src={sub.evidenceBase64} className="w-16 h-16 object-cover rounded-lg border border-slate-200 shadow-sm flex-shrink-0" />
+                                                            ) : (
+                                                                <div className="w-16 h-16 bg-slate-200 rounded-lg border border-slate-300 flex flex-col items-center justify-center text-slate-400 flex-shrink-0">
+                                                                    {sub.aiNote === "Input Manual oleh Admin" ? (
+                                                                        <><i className="fas fa-clipboard-check mb-1"></i><span className="text-[9px] font-bold">Manual</span></>
+                                                                    ) : (
+                                                                        <><i className="fas fa-image-slash mb-1"></i><span className="text-[9px] font-bold">Dihapus</span></>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex justify-between items-start mb-1 gap-2">
+                                                                    <h4 className="font-bold text-slate-800 leading-tight truncate">{sub.activity}</h4>
+                                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex-shrink-0 ${sub.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                                                        {sub.status === 'approved' ? `+${sub.pointsAwarded} Pts` : 'Ditolak'}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-xs text-slate-400 mt-1">{new Date(sub.timestamp).toLocaleString('id-ID')}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        
+                        {/* TAB LEADERBOARD */}
+                        {activeTab === 'leaderboard' && (
+                            <div className="max-w-3xl mx-auto overflow-x-auto border border-slate-200 rounded-xl bg-white">
+                                <table className="w-full text-left border-collapse">
+                                    <thead><tr className="bg-slate-50 border-b border-slate-200"><th className="p-4 w-16 text-center font-bold text-slate-600">Rank</th><th className="p-4 font-bold text-slate-600">Username</th><th className="p-4 text-right font-bold text-slate-600">Total Poin</th></tr></thead>
+                                    <tbody>
+                                        {userProfiles.length === 0 ? <tr><td colSpan="3" className="text-center p-8 text-slate-400 font-medium">Belum ada karyawan yang terdaftar.</td></tr> : userProfiles.map((user, idx) => {
+                                            let rankIcon = <span className="font-bold text-slate-400 text-lg">{idx + 1}</span>;
+                                            if (idx === 0) rankIcon = <i className="fas fa-medal text-yellow-500 text-2xl drop-shadow-sm"></i>;
+                                            else if (idx === 1) rankIcon = <i className="fas fa-medal text-slate-400 text-2xl drop-shadow-sm"></i>;
+                                            else if (idx === 2) rankIcon = <i className="fas fa-medal text-amber-700 text-2xl drop-shadow-sm"></i>;
+                                            
+                                            return (
+                                                <tr key={user.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
+                                                    <td className="p-4 text-center">{rankIcon}</td>
+                                                    <td className="p-4 font-bold text-slate-700 text-lg">@{user.username}</td>
+                                                    <td className="p-4 text-right text-emerald-600 font-bold text-xl">{user.totalPoints} <span className="text-sm font-medium text-slate-400">Pts</span></td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* INPUT MANUAL ADMIN */}
+                        {activeTab === 'manual' && (
+                            <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+                                <div className="text-center mb-6">
+                                    <div className="bg-emerald-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3">
+                                        <i className="fas fa-hand-holding-medical text-2xl text-emerald-600"></i>
+                                    </div>
+                                    <h2 className="text-2xl font-bold text-slate-800">Input Poin Manual</h2>
+                                    <p className="text-sm text-slate-500 mt-1">Tambahkan poin untuk aktivitas offline tanpa karyawan perlu mengunggah foto.</p>
+                                </div>
+
+                                <form onSubmit={handleManualSubmit} className="space-y-5">
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">1. Pilih Karyawan</label>
+                                        <select 
+                                            value={manualUser} 
+                                            onChange={(e) => setManualUser(e.target.value)}
+                                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
+                                            required
+                                        >
+                                            <option value="" disabled>-- Pilih Akun Karyawan --</option>
+                                            {userProfiles.map(u => (
+                                                <option key={u.id} value={u.id}>@{u.username} (Saat ini: {u.totalPoints} Pts)</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">2. Pilih Kategori Aktivitas</label>
+                                        <select 
+                                            value={manualActivity} 
+                                            onChange={(e) => setManualActivity(e.target.value)}
+                                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-medium"
+                                        >
+                                            <optgroup label="A. DAILY POINT">
+                                              <option value="Aktivitas Fisik">Aktivitas Fisik</option>
+                                              <option value="Pola Makan Sehat">Pola Makan Sehat</option>
+                                              <option value="Minum Air">Minum Air</option>
+                                              <option value="Tidur & Pemulihan">Tidur & Pemulihan</option>
+                                              <option value="Partisipasi Program">Partisipasi Program</option>
+                                            </optgroup>
+                                            <optgroup label="B. BONUS & CHALLENGE POINT">
+                                              <option value="Bonus Ajak Keluarga">Bonus Ajak Keluarga</option>
+                                              <option value="Challenge Juni">Challenge Juni</option>
+                                              <option value="Challenge Juli">Challenge Juli</option>
+                                              <option value="Challenge Agustus">Challenge Agustus</option>
+                                              <option value="Challenge September">Challenge September</option>
+                                              <option value="Challenge Oktober">Challenge Oktober</option>
+                                              <option value="Challenge November">Challenge November</option>
+                                              <option value="Challenge Desember">Challenge Desember</option>
+                                              <option value="Challenge Januari">Challenge Januari</option>
+                                              <option value="Challenge Februari">Challenge Februari</option>
+                                              <option value="Lain-Lain (Custom)">Lain-Lain (Custom)</option>
+                                            </optgroup>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-1">3. Jumlah Poin</label>
+                                        <input 
+                                            type="number" 
+                                            value={manualPoints}
+                                            onChange={(e) => setManualPoints(e.target.value)}
+                                            className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-600 text-lg"
+                                            required
+                                        />
+                                    </div>
+
+                                    <button 
+                                        type="submit" 
+                                        disabled={isManualSubmitting}
+                                        className={`w-full font-bold py-4 rounded-xl text-white shadow-md transition ${isManualSubmitting ? 'bg-slate-400' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                                    >
+                                        {isManualSubmitting ? <><i className="fas fa-spinner fa-spin mr-2"></i> Menyimpan...</> : <><i className="fas fa-paper-plane mr-2"></i> Tambahkan Poin ke Karyawan</>}
+                                    </button>
+                                </form>
+                            </div>
+                        )}
+
+                        {/* MANAJEMEN AKUN */}
+                        {activeTab === 'users' && (
+                            <div className="max-w-2xl mx-auto overflow-x-auto border border-slate-200 rounded-xl bg-white">
+                                <table className="w-full text-left border-collapse">
+                                    <thead><tr className="bg-slate-50 border-b border-slate-200"><th className="p-4 font-bold text-slate-600">Username</th><th className="p-4 font-bold text-slate-600">Password</th><th className="p-4 text-right font-bold text-slate-600">Total Poin</th></tr></thead>
+                                    <tbody>
+                                        {userProfiles.length === 0 ? <tr><td colSpan="3" className="text-center p-8 text-slate-400">Kosong</td></tr> : userProfiles.map(user => (
+                                            <tr key={user.id} className="border-b border-slate-100 hover:bg-slate-50">
+                                                <td className="p-4 font-bold text-slate-700">@{user.username}</td>
+                                                <td className="p-4 font-mono text-slate-500 bg-slate-50/50">{user.password}</td>
+                                                <td className="p-4 text-right">
+                                                    <span className="text-emerald-600 font-bold text-lg">{user.totalPoints} Pts</span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {/* TAB ATURAN POIN (CHEAT SHEET ADMIN) */}
+                        {activeTab === 'rules' && (
+                            <div className="bg-blue-50/50 p-6 rounded-xl border border-blue-100">
+                                <h3 className="text-xl font-bold text-blue-800 mb-4"><i className="fas fa-info-circle"></i> Panduan Penilaian Admin (Maks 100 Poin/Hari)</h3>
+                                
+                                <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm mb-4">
+                                    <h4 className="font-bold text-emerald-600 mb-3 border-b pb-2 text-lg">1. Aktivitas Fisik (Maks 40 Poin/Hari)</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-700 mb-2">Base Point (Berdasarkan Durasi)</p>
+                                            <ul className="text-sm text-slate-600 space-y-1">
+                                                <li><span className="font-semibold">10 Poin:</span> 30 – 44 menit</li>
+                                                <li><span className="font-semibold">15 Poin:</span> 45 – 59 menit</li>
+                                                <li><span className="font-semibold">20 Poin:</span> 60 – 89 menit</li>
+                                                <li><span className="font-semibold">25 Poin:</span> 90 – 119 menit</li>
+                                                <li><span className="font-semibold">30 Poin:</span> ≥ 120 menit</li>
+                                            </ul>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-700 mb-2">Multiplier (Berdasarkan Intensitas)</p>
+                                            <ul className="text-sm text-slate-600 space-y-1">
+                                                <li><span className="font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded mr-1">x 1.0</span> Low (Jalan santai, stretching, tai chi)</li>
+                                                <li><span className="font-semibold px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded mr-1">x 1.25</span> Medium (Brisk walk, yoga, sepeda santai)</li>
+                                                <li><span className="font-semibold px-2 py-0.5 bg-orange-100 text-orange-700 rounded mr-1">x 1.5</span> High (Lari, futsal, tenis, aerobik)</li>
+                                                <li><span className="font-semibold px-2 py-0.5 bg-red-100 text-red-700 rounded mr-1">x 2.0</span> Very High (Long-distance run, kompetisi)</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    <div className="mt-4 p-3 bg-slate-50 border border-slate-200 rounded text-sm font-medium text-slate-700">
+                                        <i className="fas fa-calculator mr-2 text-emerald-500"></i>Rumus: <span className="text-emerald-700 font-bold">Base Point x Multiplier = POIN HARIAN (Maks. 40)</span>
+                                    </div>
+                                </div>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
+                                        <h4 className="font-bold text-emerald-600 mb-2 border-b pb-1">2. Pola Makan Sehat (Maks 20 Poin)</h4>
+                                        <ul className="text-sm text-slate-600 space-y-1">
+                                            <li><span className="font-bold text-emerald-600">20 Poin:</span> ≥ 80% komposisi ideal</li>
+                                            <li><span className="font-bold text-yellow-600">15 Poin:</span> 60% - 79% komposisi ideal</li>
+                                            <li><span className="font-bold text-orange-600">10 Poin:</span> 40% - 59% komposisi ideal</li>
+                                            <li><span className="font-bold text-red-600">0 Poin:</span> &lt; 40% komposisi ideal</li>
+                                        </ul>
+                                    </div>
+                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
+                                        <h4 className="font-bold text-blue-600 mb-2 border-b pb-1">3. Minum Air (Maks 10 Poin)</h4>
+                                        <ul className="text-sm text-slate-600 space-y-1">
+                                            <li><span className="font-bold text-emerald-600">10 Poin:</span> ≥ 2 Liter</li>
+                                            <li><span className="font-bold text-orange-600">5 Poin:</span> 1 - 1,9 Liter</li>
+                                            <li><span className="font-bold text-red-600">0 Poin:</span> &lt; 1 Liter</li>
+                                        </ul>
+                                    </div>
+                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
+                                        <h4 className="font-bold text-indigo-600 mb-2 border-b pb-1">4. Tidur & Pemulihan (Maks 10 Poin)</h4>
+                                        <ul className="text-sm text-slate-600 space-y-1">
+                                            <li><span className="font-bold text-emerald-600">10 Poin:</span> 7 - 9 jam</li>
+                                            <li><span className="font-bold text-orange-600">5 Poin:</span> 6 - &lt;7 jam ATAU &gt; 9 jam</li>
+                                            <li><span className="font-bold text-red-600">0 Poin:</span> &lt; 6 jam</li>
+                                        </ul>
+                                    </div>
+                                    <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
+                                        <h4 className="font-bold text-cyan-600 mb-2 border-b pb-1">5. Partisipasi Program (Maks 40 Poin)</h4>
+                                        <ul className="text-sm text-slate-600 space-y-1">
+                                            <li><span className="font-bold text-emerald-600">15 Poin:</span> Event olahraga kantor / komunitas</li>
+                                            <li><span className="font-bold text-blue-600">10 Poin:</span> Seminar / Health Talk / Webinar</li>
+                                            <li><span className="font-bold text-indigo-600">10 Poin:</span> Campaign / Challenge perusahaan</li>
+                                            <li><span className="font-bold text-cyan-600">5 Poin:</span> Share aktivitas sehat</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                
+                                <h3 className="text-lg font-bold text-amber-600 mt-6 mb-3"><i className="fas fa-star"></i> Bonus Tambahan & Penalty</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 shadow-sm">
+                                        <h4 className="font-bold text-amber-700 mb-1">1. Bonus Ajak Keluarga</h4>
+                                        <ul className="text-sm text-slate-700 space-y-1">
+                                            <li><span className="font-bold text-lg">+20 POIN / SUBMISSION</span></li>
+                                            <li>Minimal 1 anggota keluarga ikut serta.</li>
+                                            <li>Maksimal 20 submission per cycle (Maks 400 poin).</li>
+                                        </ul>
+                                    </div>
+                                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 shadow-sm">
+                                        <h4 className="font-bold text-blue-700 mb-1">2. Challenge Point</h4>
+                                        <ul className="text-sm text-slate-700 space-y-1">
+                                            <li><span className="font-bold text-emerald-600">Mudah:</span> +50 Poin</li>
+                                            <li><span className="font-bold text-blue-600">Sedang:</span> +100 Poin</li>
+                                            <li><span className="font-bold text-orange-600">Sulit:</span> +150 Poin</li>
+                                            <li><span className="font-bold text-red-600">Sgt Sulit:</span> +200 Poin</li>
+                                        </ul>
+                                    </div>
+                                    <div className="bg-red-50 p-4 rounded-lg border border-red-200 shadow-sm">
+                                        <h4 className="font-bold text-red-700 mb-1"><i className="fas fa-exclamation-triangle"></i> Penalty / Pelanggaran</h4>
+                                        <ul className="text-sm text-slate-700 space-y-1">
+                                            <li><span className="font-bold text-red-600">-100 POIN:</span> Bukti Palsu / Manipulasi Data</li>
+                                            <li><span className="font-bold text-red-600">-100 POIN:</span> Kecurangan / Tidak Jujur</li>
+                                            <li><span className="font-bold text-red-700">DISKUALIFIKASI:</span> Pelanggaran Berulang</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
