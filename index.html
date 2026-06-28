@@ -5,18 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fit for Rewards App</title>
     
-    <!-- Memuat Tailwind CSS untuk Desain -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Memuat FontAwesome untuk Ikon -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- Memuat React (Versi Stabil) -->
     <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
 
-    <!-- HANYA memuat Core dan Realtime Database -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 </head>
@@ -109,7 +105,6 @@
                 if (currentUser) {
                     const updatedProfile = profiles.find(p => p.id === currentUser.id);
                     if (updatedProfile) setCurrentUser(updatedProfile);
-                    // Logout otomatis jika user dihapus oleh admin
                     else handleLogout();
                 }
             }, [profiles]);
@@ -230,7 +225,6 @@
             const [isSubmitting, setIsSubmitting] = useState(false);
             const [selectedImage, setSelectedImage] = useState(null);
             
-            // State Notifikasi & Hapus Inline
             const [localMessage, setLocalMessage] = useState('');
             const [deleteConfirmId, setDeleteConfirmId] = useState(null);
             
@@ -664,6 +658,44 @@
                 setDeleteHistoryConfirmId(null);
             };
 
+            // DEVELOPMENT BARU: Fungsi untuk ekspor seluruh riwayat ke file CSV Excel
+            const exportToCSV = () => {
+                if (historySubs.length === 0) {
+                    setAdminMessage("⚠️ Tidak ada data riwayat untuk diunduh.");
+                    setTimeout(() => setAdminMessage(''), 4000);
+                    return;
+                }
+
+                // Header kolom di tabel excel
+                let csvContent = "\uFEFF"; // BOM untuk mendeteksi karakter UTF-8 di Excel secara otomatis
+                csvContent += "Tanggal & Waktu,Username Karyawan,Kategori Aktivitas,Poin Diberikan,Status Laporan,Keterangan\n";
+
+                // Memasukkan setiap baris riwayat data
+                historySubs.forEach(sub => {
+                    const datetime = new Date(sub.timestamp).toLocaleString('id-ID').replace(/,/g, '');
+                    const uName = `@${sub.username}`;
+                    const act = sub.activity.replace(/,/g, '-');
+                    const pts = sub.pointsAwarded;
+                    const stat = sub.status === 'approved' ? 'Disetujui' : 'Ditolak';
+                    const note = sub.aiNote ? sub.aiNote : (sub.evidenceBase64 === "" ? "Foto sudah dibersihkan" : "Ada Lampiran Foto");
+
+                    csvContent += `"${datetime}","${uName}","${act}","${pts}","${stat}","${note}"\n`;
+                });
+
+                // Proses pembuatan file download browser
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.setAttribute("href", url);
+                link.setAttribute("download", `Rekap_Riwayat_FitRewards_${new Date().toISOString().split('T')[0]}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                setAdminMessage("📊 Berhasil mengunduh Excel Rekap Riwayat!");
+                setTimeout(() => setAdminMessage(''), 4000);
+            };
+
             return (
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                     <div className="flex overflow-x-auto items-center bg-slate-50 border-b border-slate-200">
@@ -759,16 +791,27 @@
                         {/* TAB RIWAYAT VALIDASI */}
                         {activeTab === 'history' && (
                             <div className="space-y-6">
-                                <div className="relative max-w-2xl mx-auto">
-                                    <i className="fas fa-search absolute left-4 top-4 text-slate-400"></i>
-                                    <input 
-                                        type="text" 
-                                        placeholder="Cari berdasarkan username Karyawan atau aktivitas..." 
-                                        value={searchHistory}
-                                        onChange={(e) => setSearchHistory(e.target.value)}
-                                        className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm"
-                                    />
+                                {/* Baris Kolom Pencarian + Tombol Cetak Excel */}
+                                <div className="flex flex-col sm:flex-row gap-4 max-w-3xl mx-auto items-center justify-between">
+                                    <div className="relative flex-1 w-full">
+                                        <i className="fas fa-search absolute left-4 top-4 text-slate-400"></i>
+                                        <input 
+                                            type="text" 
+                                            placeholder="Cari berdasarkan username Karyawan atau aktivitas..." 
+                                            value={searchHistory}
+                                            onChange={(e) => setSearchHistory(e.target.value)}
+                                            className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm"
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={exportToCSV}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-3 rounded-xl shadow-md transition flex items-center gap-2 w-full sm:w-auto justify-center"
+                                        title="Unduh seluruh data riwayat ke Excel (CSV)"
+                                    >
+                                        <i className="fas fa-file-excel text-lg"></i> Unduh Excel (CSV)
+                                    </button>
                                 </div>
+
                                 {sortedHistoryUsers.length === 0 ? (
                                     <div className="text-center py-10 text-slate-500">
                                         <i className="fas fa-folder-open text-4xl mb-3 text-slate-300"></i>
